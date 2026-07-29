@@ -1,0 +1,6 @@
+/max-action
+coverage.out
+coverage.html
+*.test
+.env
+.env.*
