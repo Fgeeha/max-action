@@ -85,12 +85,12 @@ jobs:
             *"exactly one of chat_id or user_id"*) ;;
             *) echo "::error::unexpected failure message"; exit 1 ;;
           esac
-          case "$output" in
-            *dummy-token*)
-              printf '::error::the token appeared in the output\n'
-              exit 1
-              ;;
-          esac
+          # The ::add-mask:: line necessarily carries the token, since that is
+          # how the runner learns to redact it. Nothing else may.
+          if printf '%s\n' "$output" | grep -v '^::add-mask::' | grep -q 'dummy-token'; then
+            echo "::error::the token appeared outside the add-mask command"
+            exit 1
+          fi
 
   action:
     name: Action metadata
