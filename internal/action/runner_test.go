@@ -190,6 +190,40 @@ func TestRunSucceedsWithoutMessageID(t *testing.T) {
 	}
 }
 
+// A delivered message must not be reported as a failure just because the
+// outputs could not be recorded: a retry would send it twice.
+func TestRunWarnsWhenOutputsCannotBeWritten(t *testing.T) {
+	h, closeServer := newHarness(t, sendOK)
+	defer closeServer()
+
+	h.inputs["GITHUB_OUTPUT"] = filepath.Join(t.TempDir(), "missing-dir", "output")
+
+	if err := h.run(); err != nil {
+		t.Fatalf("a delivered message must still succeed: %v", err)
+	}
+	stdout := h.stdout.String()
+	if !strings.Contains(stdout, "::warning::message sent, but the outputs could not be recorded") {
+		t.Errorf("expected a warning:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "::error::") {
+		t.Errorf("must not emit an error annotation:\n%s", stdout)
+	}
+}
+
+func TestRunWithoutGithubOutput(t *testing.T) {
+	h, closeServer := newHarness(t, sendOK)
+	defer closeServer()
+
+	delete(h.inputs, "GITHUB_OUTPUT")
+
+	if err := h.run(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(h.stdout.String(), "sent successfully") {
+		t.Errorf("stdout = %s", h.stdout.String())
+	}
+}
+
 func TestRunConfigErrorsSkipTheRequest(t *testing.T) {
 	tests := []struct {
 		name     string

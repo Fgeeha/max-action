@@ -26,7 +26,8 @@ func Run(ctx context.Context, env Env) error {
 	log := &github.Logger{Out: env.Stdout}
 
 	// Mask the raw token before any other code can put it in a log line.
-	log.Mask(env.Getenv("INPUT_TOKEN"))
+	rawToken := env.Getenv("INPUT_TOKEN")
+	log.Mask(rawToken)
 
 	cfg, err := config.Load(env.Getenv)
 	if err != nil {
@@ -34,7 +35,10 @@ func Run(ctx context.Context, env Env) error {
 		return err
 	}
 	log.Debug = cfg.Debug
-	log.Mask(cfg.Token)
+	// Inputs arrive trimmed, so mask the trimmed form too when it differs.
+	if cfg.Token != rawToken {
+		log.Mask(cfg.Token)
+	}
 
 	ghCtx := message.ContextFromEnv(env.Getenv)
 	text, err := message.Resolve(cfg, ghCtx)
@@ -74,14 +78,15 @@ func Run(ctx context.Context, env Env) error {
 		return err
 	}
 
+	// The message is already delivered at this point. A failure to record the
+	// outputs must not fail the step, or a retry would send it twice.
 	recipientID := strconv.FormatInt(cfg.RecipientID, 10)
 	if err := github.WriteOutputs(env.Getenv("GITHUB_OUTPUT"), []github.Output{
 		{Name: "message_id", Value: mid},
 		{Name: "recipient_type", Value: cfg.RecipientType},
 		{Name: "recipient_id", Value: recipientID},
 	}); err != nil {
-		log.Errorf("%s", err)
-		return err
+		log.Warningf("message sent, but the outputs could not be recorded: %s", err)
 	}
 
 	log.Printf("MAX message sent successfully to %s %s", cfg.RecipientType, recipientID)

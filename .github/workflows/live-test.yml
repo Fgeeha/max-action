@@ -1,0 +1,39 @@
+# Sends a real message through the MAX API. Kept out of CI on purpose: it is
+# manual only, runs against a protected environment and never runs for pull
+# requests, so a fork can never reach the token.
+name: Live integration test
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: Message text to send
+        required: false
+        default: max-action live integration test
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    name: Send a real MAX message
+    runs-on: ubuntu-latest
+    environment: live-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Send message
+        id: notify
+        uses: ./
+        with:
+          token: ${{ secrets.MAX_TOKEN }}
+          chat_id: ${{ secrets.MAX_CHAT_ID }}
+          message: |
+            ${{ inputs.message }}
+
+            Repository: ${{ github.repository }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Report
+        run: echo "Sent message ${{ steps.notify.outputs.message_id }} to ${{ steps.notify.outputs.recipient_type }}"

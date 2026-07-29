@@ -1,0 +1,64 @@
+name: MAX Message Notify
+description: Send notifications to MAX from GitHub Actions
+author: Fgeeha
+
+inputs:
+  token:
+    description: MAX bot access token
+    required: true
+  chat_id:
+    description: MAX chat or channel ID. Mutually exclusive with user_id
+    required: false
+  user_id:
+    description: MAX user ID for a direct message. Mutually exclusive with chat_id
+    required: false
+  message:
+    description: Message text. Ignored when message_file is set
+    required: false
+  message_file:
+    description: UTF-8 file whose contents override message
+    required: false
+  format:
+    description: "Message format: markdown, html, or empty"
+    required: false
+    default: ""
+  notify:
+    description: Notify recipients
+    required: false
+    default: "true"
+  disable_link_preview:
+    description: Disable link previews
+    required: false
+    default: "false"
+  api_base_url:
+    description: MAX API base URL
+    required: false
+    default: https://platform-api2.max.ru
+  timeout:
+    description: HTTP timeout in seconds (1-120)
+    required: false
+    default: "15"
+  retries:
+    description: Number of retry attempts after the first request (0-5)
+    required: false
+    default: "2"
+  debug:
+    description: Enable safe debug logging
+    required: false
+    default: "false"
+
+outputs:
+  message_id:
+    description: Sent MAX message ID when returned by the API
+  recipient_type:
+    description: "Recipient type: chat or user"
+  recipient_id:
+    description: Recipient ID used by the action
+
+runs:
+  using: docker
+  image: Dockerfile
+
+branding:
+  icon: message-square
+  color: blue
