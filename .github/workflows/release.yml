@@ -51,8 +51,16 @@ jobs:
           git tag -f "$major" "$TAG"
           git push origin -f "refs/tags/$major"
 
+      # Publishing a release through the GitHub UI creates the tag, which
+      # triggers this workflow, so the release may already exist by the time we
+      # get here. Hand-written release notes are left untouched.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --title "$TAG" --generate-notes
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::release $TAG already exists, keeping it as published"
+            exit 0
+          fi
+          gh release create "$TAG" --title "$TAG" --generate-notes
