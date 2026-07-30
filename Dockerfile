@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/max-action ./cmd/max-action
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 LABEL org.opencontainers.image.title="max-action" \
       org.opencontainers.image.description="Send notifications to MAX from GitHub Actions" \
