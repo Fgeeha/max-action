@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-16
+
+### Changed
+
+- The action now pulls a prebuilt image from
+  `ghcr.io/fgeeha/max-action` instead of building the `Dockerfile` in every
+  consumer workflow, which removes a Go compile from each run.
+- The runtime image is based on `scratch` instead of Alpine: about 6 MB
+  instead of 14 MB, with no shell and no package manager.
+- Go 1.26.4 and Alpine 3.24 for the build stage.
+
+### Fixed
+
+- The version compiled into the binary, and therefore the `User-Agent`, is now
+  the released tag. It was always `dev`, because GitHub cannot pass build
+  arguments to an inline `image: Dockerfile` action.
+
+### Added
+
+- A test that fails 90 days before any vendored MAX certificate expires, and a
+  weekly CI schedule so a dormant repository still reports it.
+- The release workflow verifies that `action.yml` pins the image tag being
+  released before anything is published.
+
+### Security
+
+- Third-party actions in every workflow are pinned by commit SHA.
+
+## [1.0.0] - 2026-07-30
+
 ### Added
 
 - Send a single text message to a MAX chat, channel or user through

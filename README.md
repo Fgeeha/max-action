@@ -256,6 +256,13 @@ This is a Docker container action, so it runs only on **Linux runners**
 (`ubuntu-latest` and other Linux images). It cannot run on Windows or macOS
 runners.
 
+The action pulls a prebuilt image from the GitHub Container Registry
+(`ghcr.io/fgeeha/max-action`) rather than building the `Dockerfile` in your
+workflow, so a step costs a few seconds instead of a full Go compile. The image
+is built from this repository by the release workflow, is around 6 MB, and is
+based on `scratch`: it contains the statically linked binary and a public CA
+bundle, with no shell and no package manager.
+
 The container runs as the default user so it can read the mounted workspace and
 append to the runner-created `GITHUB_OUTPUT` file.
 
@@ -277,10 +284,16 @@ uses: Fgeeha/max-action@v1
 Pin an exact release when you need reproducible builds:
 
 ```yaml
-uses: Fgeeha/max-action@v1.0.0
+uses: Fgeeha/max-action@v1.0.1
 ```
 
-Do not use `@Master`: it tracks unreleased work.
+Each release tag resolves to one immutable image tag, because `action.yml`
+pins the exact `ghcr.io/fgeeha/max-action:vX.Y.Z` it was released with. The
+release workflow refuses to publish when that pin does not match the tag being
+released.
+
+Do not use `@Master`: it tracks unreleased work, and its `action.yml` pins an
+image tag that may not be published yet.
 
 ## License
 
