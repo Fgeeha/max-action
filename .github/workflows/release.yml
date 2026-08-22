@@ -65,6 +65,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # provenance/attestations require the docker-container driver; the
+      # default `docker` driver rejects them outright.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
       # VERSION only reaches the binary here: GitHub cannot pass build args to
       # an inline `image: Dockerfile` action, so this is where the User-Agent
       # stops saying "dev".
