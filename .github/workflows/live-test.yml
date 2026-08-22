@@ -21,7 +21,18 @@ jobs:
     environment: live-test
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The point of this workflow is to reach the real API with the code in
+      # this branch, so it builds the Dockerfile instead of pulling the image
+      # of the previous release that action.yml pins.
+      - name: Test the action against the sources in this commit
+        run: |
+          sed -i 's|^  image: docker://.*|  image: Dockerfile|' action.yml
+          grep -q '^  image: Dockerfile$' action.yml || {
+            echo "::error::could not repoint action.yml at the local Dockerfile"
+            exit 1
+          }
 
       - name: Send message
         id: notify

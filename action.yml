@@ -57,7 +57,11 @@ outputs:
 
 runs:
   using: docker
-  image: Dockerfile
+  # A prebuilt image is pulled instead of building the Dockerfile on every run,
+  # which would add a Go compile to each consumer workflow. The tag is bumped in
+  # the release commit and the release workflow refuses to publish unless it
+  # matches the tag being released.
+  image: docker://ghcr.io/fgeeha/max-action:v1.0.1
 
 branding:
   icon: message-square
