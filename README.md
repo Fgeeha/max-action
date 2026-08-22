@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Fgeeha/max-action/actions/workflows/ci.yml/badge.svg)](https://github.com/Fgeeha/max-action/actions/workflows/ci.yml)
 
+🇬🇧 English | [🇷🇺 Русский](README.ru.md)
+
 Send notifications to [MAX](https://max.ru) from GitHub Actions through the
 official MAX Bot API. Use it to report pushes, pull requests, deployments and
 failed builds to a chat, channel or direct message.
