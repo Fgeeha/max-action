@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Fgeeha/max-action/internal/config"
@@ -96,6 +97,10 @@ func TestMessageFileErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "binary.txt"), []byte{0xff, 0xfe, 0xfd}, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeFile(t, dir, "big.txt", strings.Repeat("a", maxMessageFileBytes+1))
+	if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct{ name, file, wantErr string }{
 		{"missing file", "missing.txt", "message_file not found"},
@@ -103,6 +108,9 @@ func TestMessageFileErrors(t *testing.T) {
 		{"empty file", "empty.txt", "message is empty"},
 		{"whitespace only", "blank.txt", "message is empty"},
 		{"invalid utf8", "binary.txt", "not valid UTF-8"},
+		{"oversized file", "big.txt", "message_file exceeds 16000 bytes"},
+		{"device", "/dev/null", "message_file is not a regular file"},
+		{"fifo", "pipe", "message_file is not a regular file"},
 	}
 
 	for _, tt := range tests {
@@ -115,6 +123,28 @@ func TestMessageFileErrors(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// 4000 four-byte characters fill the byte limit exactly and are still a valid
+// message; one more byte is rejected by size before the character count.
+func TestMessageFileByteBoundary(t *testing.T) {
+	dir := t.TempDir()
+	full := strings.Repeat("😀", config.MaxMessageRunes)
+	writeFile(t, dir, "full.txt", full)
+	writeFile(t, dir, "over.txt", full+"a")
+
+	got, err := Resolve(&config.Config{MessageFile: "full.txt"}, Context{Workspace: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != full {
+		t.Error("file content changed")
+	}
+
+	_, err = Resolve(&config.Config{MessageFile: "over.txt"}, Context{Workspace: dir})
+	if err == nil || !strings.Contains(err.Error(), "exceeds 16000 bytes") {
+		t.Fatalf("error = %v, want size error", err)
 	}
 }
 

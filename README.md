@@ -161,6 +161,9 @@ fails before any request is made.
 
 The message text comes from the first available source: `message_file`, then
 `message`, then the built-in template. It must be 1–4000 characters.
+`message_file` must be a regular file of at most 16 000 bytes (4000
+characters of up to 4 bytes each); larger files are rejected without being
+read in full.
 
 ## Outputs
 
@@ -204,6 +207,13 @@ versions, so this README deliberately does not restate it.
   limit on its own; if you fan out several steps to the same chat, space them
   out yourself.
 - A `429` response is retried according to the `Retry-After` header.
+- `POST /messages` is not idempotent. If MAX accepts a message but the
+  response is lost on the way back (a dropped connection or a timeout), the
+  action cannot tell this from a request that never arrived and retries it, so
+  the recipient may get the message twice. `retries: "0"` lowers that risk at
+  the cost of failing on any transient error, and still does not guarantee
+  exactly-once delivery. A `2xx` whose body cannot be read is treated as sent:
+  the step succeeds with an empty `message_id` and nothing is resent.
 - The current API host is `platform-api2.max.ru`. The older
   `platform-api.max.ru` host is not used.
 
@@ -254,6 +264,14 @@ Two properties are deliberate:
   client. The container's system trust store is left untouched, so the extra
   trust cannot affect anything else in the job.
 
+The bundle has to be renewed before it expires: the *Russian Trusted Sub CA*
+certificate is valid until 6 March 2027. `TestEmbeddedCANotExpiring` starts
+failing 90 days ahead, and CI runs it weekly on a schedule. GitHub disables
+scheduled workflows after 60 days without repository activity, though, so in a
+quiet repository that check stops on its own. Keep a calendar reminder for the
+renewal date, or trigger the CI workflow from an external scheduler through
+`workflow_dispatch`.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -266,6 +284,7 @@ Two properties are deliberate:
 | `message exceeds MAX limit of 4000 characters` | Shorten the text, or trim the file used by `message_file`. |
 | `message is empty` | `message_file` pointed at an empty file. |
 | `message_file not found` | The path resolves against `GITHUB_WORKSPACE` and needs `actions/checkout` to run first. |
+| `message_file exceeds 16000 bytes` / `is not a regular file` | Point `message_file` at a regular file of at most 16 000 bytes, not a pipe or device. |
 | `attachment_file not found` / `exceeds 50 MiB` | Same path rules as `message_file`; files over 50 MiB are rejected before upload. |
 | `attachment.not.ready` | MAX was still processing the file after 10 attempts 2 s apart. Retry the job. |
 | `cannot get upload URL ...` | MAX refused `POST /uploads`: the same causes as HTTP 401/403 above, or a temporary MAX outage. |
@@ -273,6 +292,7 @@ Two properties are deliberate:
 | `attachment_file is empty` / `is not a regular file` | Point `attachment_file` at a non-empty regular file, not a directory or device. |
 | `redirects are not allowed` | `api_base_url` points at something that redirects. Use the direct API host. |
 | Repeated `502`/`503` failures | MAX is unavailable. Raise `retries`, or `timeout` for slow networks. |
+| The same message arrives twice | MAX accepted the first attempt but its response was lost, so the action retried. See [MAX API limits](#max-api-limits). |
 
 Set `debug: "true"` for per-attempt logging of status codes and timings. It
 never reveals the token or the message text.
@@ -311,7 +331,7 @@ uses: Fgeeha/max-action@v1
 Pin an exact release when you need reproducible builds:
 
 ```yaml
-uses: Fgeeha/max-action@v1.1.1
+uses: Fgeeha/max-action@v1.1.2
 ```
 
 Each release tag resolves to one immutable image tag, because `action.yml`

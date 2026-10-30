@@ -213,14 +213,21 @@ func (c *Client) do(parent context.Context, timeout time.Duration, r request, at
 
 	c.log(c.debugf, "attempt %d: HTTP %d in %s", attempt+1, resp.StatusCode, time.Since(started).Round(time.Millisecond))
 
-	data, err := readLimited(resp.Body)
-	if err != nil {
-		return nil, retryHint{}, err
+	// The status alone decides the outcome: a 2xx means MAX accepted the
+	// request, so a body that breaks off or runs past the limit must neither
+	// fail the step nor trigger a retry that would send the message twice. A
+	// non-2xx keeps its status and retry policy, just without the API detail.
+	data, readErr := readLimited(resp.Body)
+	if readErr != nil {
+		data = nil
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		code, detail := c.errorDetail(data)
 		return nil, c.hintFor(resp), &Error{StatusCode: resp.StatusCode, Code: code, Detail: detail}
+	}
+	if readErr != nil {
+		c.log(c.warnf, "HTTP %d response body was discarded: %s", resp.StatusCode, c.redact(readErr.Error()))
 	}
 	return data, retryHint{}, nil
 }

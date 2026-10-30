@@ -5,6 +5,7 @@ package message
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,11 @@ import (
 
 	"github.com/Fgeeha/max-action/internal/config"
 )
+
+// maxMessageFileBytes is the most a message_file may hold: 4000 characters of
+// at most 4 bytes each. Anything larger cannot be a valid message, so it is
+// rejected before being read in full.
+const maxMessageFileBytes = config.MaxMessageRunes * utf8.UTFMax
 
 // Context carries the GitHub Actions variables used by the default template.
 // Any field may be empty: the template skips lines it cannot fill.
@@ -69,7 +75,8 @@ func resolveText(cfg *config.Config, ctx Context) (string, error) {
 }
 
 // WorkspaceFile resolves a file input against the workspace and checks that
-// it exists and is not a directory. input names the input in error messages.
+// it is a regular file: reading a FIFO or a device could block or never end.
+// input names the input in error messages.
 func WorkspaceFile(input, path, workspace string) (string, error) {
 	if !filepath.IsAbs(path) && workspace != "" {
 		path = filepath.Join(workspace, path)
@@ -85,6 +92,9 @@ func WorkspaceFile(input, path, workspace string) (string, error) {
 	if info.IsDir() {
 		return "", fmt.Errorf("%s is a directory: %s", input, path)
 	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file: %s", input, path)
+	}
 	return path, nil
 }
 
@@ -96,9 +106,19 @@ func readMessageFile(path, workspace string) (string, error) {
 		return "", err
 	}
 
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("message_file cannot be read: %s", path)
+	}
+	defer f.Close()
+
+	// One byte past the limit is enough to tell an oversized file apart.
+	data, err := io.ReadAll(io.LimitReader(f, maxMessageFileBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("message_file cannot be read: %s", path)
+	}
+	if len(data) > maxMessageFileBytes {
+		return "", fmt.Errorf("message_file exceeds %d bytes: %s", maxMessageFileBytes, path)
 	}
 	if !utf8.Valid(data) {
 		return "", fmt.Errorf("message_file is not valid UTF-8: %s", path)
