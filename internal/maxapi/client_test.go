@@ -3,6 +3,7 @@ package maxapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -430,18 +431,92 @@ func TestSendRejectsRedirects(t *testing.T) {
 	}
 }
 
-func TestSendRejectsOversizedResponse(t *testing.T) {
+// A 2xx whose body cannot be read still means MAX accepted the message: the
+// step must succeed without a message_id and must not send a second copy.
+func TestSendToleratesUnreadableSuccessBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"oversized body", func(w http.ResponseWriter, r *http.Request) {
+			w.Write(make([]byte, maxBodyBytes+1024))
+		}},
+		{"truncated body", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, `{"message":`)
+			w.(http.Flusher).Flush()
+			panic(http.ErrAbortHandler)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				tt.handler(w, r)
+			}))
+			defer server.Close()
+
+			base, _ := url.Parse(server.URL)
+			var warnings []string
+			client, err := New(Options{
+				BaseURL: base, Token: testToken, Timeout: 2 * time.Second, Retries: 3, Version: "test",
+				Warnf: func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) },
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			mid, err := client.Send(context.Background(), chatMessage())
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if mid != "" {
+				t.Errorf("mid = %q, want empty", mid)
+			}
+			if calls.Load() != 1 {
+				t.Errorf("made %d requests, want 1: an accepted message must not be resent", calls.Load())
+			}
+			if len(warnings) != 1 || !strings.Contains(warnings[0], "discarded") {
+				t.Errorf("warnings = %q, want one about the unreadable body", warnings)
+			}
+		})
+	}
+}
+
+// When MAX accepts the POST but the response is lost on the way back, the
+// client cannot tell this from a request that never arrived and retries it:
+// the recipient gets the message twice. README documents this trade-off.
+func TestSendRetryAfterLostResponseDuplicates(t *testing.T) {
+	var delivered atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(make([]byte, maxBodyBytes+1024))
+		io.ReadAll(r.Body)
+		if delivered.Add(1) == 1 {
+			panic(http.ErrAbortHandler) // accepted, but the connection drops before a reply
+		}
+		okResponse(w)
 	}))
 	defer server.Close()
 
-	_, err := newTestClient(t, server.URL, 0).Send(context.Background(), chatMessage())
-	if err == nil {
-		t.Fatal("expected an error")
+	mid, err := newTestClient(t, server.URL, 1).Send(context.Background(), chatMessage())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "exceeds") {
-		t.Errorf("error = %q", err)
+	if mid != "mid-1" {
+		t.Errorf("mid = %q", mid)
+	}
+	if delivered.Load() != 2 {
+		t.Errorf("server received %d requests, want 2", delivered.Load())
+	}
+
+	delivered.Store(0)
+	if _, err := newTestClient(t, server.URL, 0).Send(context.Background(), chatMessage()); err == nil {
+		t.Fatal("with retries 0 a lost response must surface as an error")
+	}
+	if delivered.Load() != 1 {
+		t.Errorf("with retries 0 server received %d requests, want 1", delivered.Load())
 	}
 }
 
