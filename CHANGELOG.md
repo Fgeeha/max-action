@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-30
+
+### Fixed
+
+- A network error during upload no longer prints the pre-signed upload URL
+  in the error or debug log; only its host is shown.
+- The upload is capped at 5 minutes in total instead of 5 minutes per
+  attempt.
+- The file is held in memory once instead of twice during upload.
+- MAX error codes appear in the error text, e.g.
+  `MAX API returned HTTP 400 (attachment.not.ready): ...`, so they match the
+  troubleshooting table.
+- The redirect error no longer names only the MAX API, since the upload host
+  is refused the same way.
+
+### Changed
+
+- The wait for attachment processing grows from 5 to 10 attempts, 2 seconds
+  apart.
+- The debug log no longer names the attached file.
+
 ## [1.1.0] - 2026-10-30
 
 ### Added

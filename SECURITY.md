@@ -33,7 +33,10 @@ In scope:
 - sending the `Authorization` header to an unintended host;
 - weakening or bypassing TLS verification;
 - injection through action inputs, including forged workflow commands;
-- reading or executing files outside what `message_file` is meant to read.
+- reading or executing files outside what `message_file` and `attachment_file`
+  are meant to read;
+- disclosure of the pre-signed upload URL returned by `POST /uploads`;
+- sending a file anywhere other than the upload URL issued by the MAX API.
 
 Out of scope:
 

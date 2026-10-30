@@ -110,7 +110,8 @@ Run: https://github.com/Fgeeha/max-action/actions/runs/42
 
 `attachment_file` uploads a file (up to 50 MiB) and sends it with the message.
 Relative paths resolve against `GITHUB_WORKSPACE`. The bot token goes only to
-the MAX API; the upload host receives a pre-signed URL without it.
+the MAX API; the upload host receives a pre-signed URL without it, and that URL
+never appears in logs. The whole upload is capped at 5 minutes.
 
 ```yaml
 - name: Pack the docs
@@ -266,7 +267,10 @@ Two properties are deliberate:
 | `message is empty` | `message_file` pointed at an empty file. |
 | `message_file not found` | The path resolves against `GITHUB_WORKSPACE` and needs `actions/checkout` to run first. |
 | `attachment_file not found` / `exceeds 50 MiB` | Same path rules as `message_file`; files over 50 MiB are rejected before upload. |
-| `attachment.not.ready` | MAX was still processing the file after 5 attempts 2 s apart. Retry the job. |
+| `attachment.not.ready` | MAX was still processing the file after 10 attempts 2 s apart. Retry the job. |
+| `cannot get upload URL ...` | MAX refused `POST /uploads`: the same causes as HTTP 401/403 above, or a temporary MAX outage. |
+| `cannot upload file: ...` | The upload host failed or timed out. The whole upload is capped at 5 minutes regardless of `timeout`. |
+| `attachment_file is empty` / `is not a regular file` | Point `attachment_file` at a non-empty regular file, not a directory or device. |
 | `redirects are not allowed` | `api_base_url` points at something that redirects. Use the direct API host. |
 | Repeated `502`/`503` failures | MAX is unavailable. Raise `retries`, or `timeout` for slow networks. |
 
@@ -307,7 +311,7 @@ uses: Fgeeha/max-action@v1
 Pin an exact release when you need reproducible builds:
 
 ```yaml
-uses: Fgeeha/max-action@v1.1.0
+uses: Fgeeha/max-action@v1.1.1
 ```
 
 Each release tag resolves to one immutable image tag, because `action.yml`

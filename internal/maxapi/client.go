@@ -34,7 +34,7 @@ const (
 
 // errRedirectBlocked is returned instead of following a redirect, which would
 // risk replaying the Authorization header against another host.
-var errRedirectBlocked = errors.New("redirects are not allowed: the MAX API must be reached directly")
+var errRedirectBlocked = errors.New("redirects are not allowed: MAX hosts must be reached directly")
 
 // Logf writes a diagnostic line. A nil Logf discards the message.
 type Logf func(format string, args ...any)
@@ -119,9 +119,7 @@ func (c *Client) Send(ctx context.Context, msg SendMessage) (string, error) {
 
 	req := request{url: endpoint, body: body, contentType: "application/json", auth: true}
 	for notReady := 1; ; notReady++ {
-		data, err := c.retrying(ctx, func(attempt int) ([]byte, retryHint, error) {
-			return c.do(ctx, c.timeout, req, attempt)
-		})
+		data, err := c.retrying(ctx, c.timeout, req)
 		if err == nil {
 			return c.messageID(data), nil
 		}
@@ -137,10 +135,11 @@ func (c *Client) Send(ctx context.Context, msg SendMessage) (string, error) {
 
 // retrying runs one request with the retry policy: transient failures are
 // retried with backoff or Retry-After, up to the configured number of retries.
-func (c *Client) retrying(ctx context.Context, try func(attempt int) ([]byte, retryHint, error)) ([]byte, error) {
+// timeout bounds each attempt; ctx bounds them all.
+func (c *Client) retrying(ctx context.Context, timeout time.Duration, r request) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		data, hint, err := try(attempt)
+		data, hint, err := c.do(ctx, timeout, r, attempt)
 		if err == nil {
 			return data, nil
 		}
@@ -201,11 +200,14 @@ func (c *Client) do(parent context.Context, timeout time.Duration, r request, at
 		if errors.Is(err, errRedirectBlocked) {
 			return nil, retryHint{}, errRedirectBlocked
 		}
+		// A pre-signed upload URL is a credential of its own: Go's error text
+		// carries the full URL, so only the host may reach the log.
+		text := c.redact(strings.ReplaceAll(err.Error(), r.url.String(), r.url.Scheme+"://"+r.url.Host))
 		// The caller giving up is not a transient failure.
 		if parent.Err() != nil {
-			return nil, retryHint{}, fmt.Errorf("request aborted: %s", c.redact(err.Error()))
+			return nil, retryHint{}, fmt.Errorf("request aborted: %s", text)
 		}
-		return nil, retryHint{retry: true}, fmt.Errorf("request failed: %s", c.redact(err.Error()))
+		return nil, retryHint{retry: true}, fmt.Errorf("request failed: %s", text)
 	}
 	defer resp.Body.Close()
 
@@ -258,14 +260,18 @@ func (c *Client) hintFor(resp *http.Response) retryHint {
 // endpoint builds POST /messages with the recipient and link-preview flag as
 // query parameters. The token is never part of the URL.
 func (c *Client) endpoint(msg SendMessage) *url.URL {
-	endpoint := *c.base
-	endpoint.Path = strings.TrimSuffix(endpoint.Path, "/") + "/messages"
-
 	query := url.Values{}
 	query.Set(msg.RecipientType+"_id", strconv.FormatInt(msg.RecipientID, 10))
 	if msg.DisableLinkPreview {
 		query.Set("disable_link_preview", "true")
 	}
+	return c.apiURL("/messages", query)
+}
+
+// apiURL joins a path and query onto the API base URL.
+func (c *Client) apiURL(path string, query url.Values) *url.URL {
+	endpoint := *c.base
+	endpoint.Path = strings.TrimSuffix(endpoint.Path, "/") + path
 	endpoint.RawQuery = query.Encode()
 	return &endpoint
 }

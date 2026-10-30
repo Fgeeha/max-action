@@ -3,6 +3,7 @@ package maxapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -144,11 +145,11 @@ func TestUploadRejectsUnsafeUploadURL(t *testing.T) {
 	}
 }
 
-func TestReadAttachmentLimits(t *testing.T) {
-	if _, err := readAttachment(writeFile(t, "empty.txt", "")); err == nil || !strings.Contains(err.Error(), "empty") {
+func TestEncodeAttachmentLimits(t *testing.T) {
+	if _, _, _, err := encodeAttachment(writeFile(t, "empty.txt", "")); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("empty file: err = %v", err)
 	}
-	if _, err := readAttachment(t.TempDir()); err == nil || !strings.Contains(err.Error(), "regular file") {
+	if _, _, _, err := encodeAttachment(t.TempDir()); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("directory: err = %v", err)
 	}
 
@@ -162,7 +163,72 @@ func TestReadAttachmentLimits(t *testing.T) {
 		t.Fatalf("truncate: %v", err)
 	}
 	f.Close()
-	if _, err := readAttachment(big); err == nil || !strings.Contains(err.Error(), "exceeds") {
+	if _, _, _, err := encodeAttachment(big); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("oversize: err = %v", err)
+	}
+}
+
+func TestUploadErrorNeverLeaksSignedURL(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/uploads" {
+			io.WriteString(w, `{"url":"`+server.URL+`/upload-host?sig=secret-signature"}`)
+			return
+		}
+		// Drop the connection mid-upload: Go reports it with the full URL.
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	defer server.Close()
+
+	var logged strings.Builder
+	client := newTestClient(t, server.URL, 1)
+	client.debugf = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
+
+	_, err := client.UploadFile(context.Background(), writeFile(t, "docs.zip", "zip"))
+	if err == nil {
+		t.Fatal("UploadFile succeeded on a dropped connection")
+	}
+	for _, text := range []string{err.Error(), logged.String()} {
+		if strings.Contains(text, "secret-signature") {
+			t.Fatalf("signed upload URL leaked: %s", text)
+		}
+	}
+	if !strings.Contains(err.Error(), "cannot upload file: request failed") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSendAttachmentToUser(t *testing.T) {
+	server := newUploadServer(t, 0)
+	var query string
+	inner := server.Config.Handler
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/messages" {
+			query = r.URL.RawQuery
+		}
+		inner.ServeHTTP(w, r)
+	})
+
+	msg := SendMessage{RecipientType: "user", RecipientID: 42, Text: "docs", Notify: true,
+		Attachments: []Attachment{{Type: "file", Payload: AttachmentPayload{Token: "file-token"}}}}
+	if _, err := newTestClient(t, server.URL, 0).Send(context.Background(), msg); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if query != "user_id=42" {
+		t.Fatalf("query = %q, want user_id=42", query)
+	}
+}
+
+func TestErrorShowsMAXCode(t *testing.T) {
+	err := &Error{StatusCode: 400, Code: notReadyCode, Detail: "Key: errors.process.attachment.file.not.processed"}
+	want := "MAX API returned HTTP 400 (attachment.not.ready): Key: errors.process.attachment.file.not.processed"
+	if err.Error() != want {
+		t.Fatalf("Error() = %q", err.Error())
+	}
+	if same := (&Error{StatusCode: 404, Code: "not.found", Detail: "not.found"}).Error(); same != "MAX API returned HTTP 404: not.found" {
+		t.Fatalf("code equal to detail is repeated: %q", same)
 	}
 }

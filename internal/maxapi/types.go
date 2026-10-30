@@ -58,8 +58,14 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
-	if e.Detail == "" {
-		return fmt.Sprintf("MAX API returned HTTP %d", e.StatusCode)
+	status := fmt.Sprintf("MAX API returned HTTP %d", e.StatusCode)
+	// The code is what the README troubleshooting table matches on, and MAX
+	// often words the message differently.
+	if e.Code != "" && e.Code != e.Detail {
+		status += " (" + e.Code + ")"
 	}
-	return fmt.Sprintf("MAX API returned HTTP %d: %s", e.StatusCode, e.Detail)
+	if e.Detail == "" {
+		return status
+	}
+	return status + ": " + e.Detail
 }
