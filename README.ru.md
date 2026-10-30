@@ -337,7 +337,7 @@ uses: Fgeeha/max-action@v1
 Закрепите точный релиз, если нужна воспроизводимая сборка:
 
 ```yaml
-uses: Fgeeha/max-action@v1.1.1
+uses: Fgeeha/max-action@v1.1.2
 ```
 
 Каждый релизный тег разрешается ровно в один immutable тег образа, потому

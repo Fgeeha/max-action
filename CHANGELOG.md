@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-30
+
 ### Fixed
 
 - `api_base_url` с завершающей точкой в имени хоста (`http://platform-api2.max.ru.`)

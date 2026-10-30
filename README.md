@@ -331,7 +331,7 @@ uses: Fgeeha/max-action@v1
 Pin an exact release when you need reproducible builds:
 
 ```yaml
-uses: Fgeeha/max-action@v1.1.1
+uses: Fgeeha/max-action@v1.1.2
 ```
 
 Each release tag resolves to one immutable image tag, because `action.yml`
