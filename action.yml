@@ -18,6 +18,9 @@ inputs:
   message_file:
     description: UTF-8 file whose contents override message
     required: false
+  attachment_file:
+    description: File to attach to the message (up to 50 MiB). Relative paths resolve against GITHUB_WORKSPACE
+    required: false
   format:
     description: "Message format: markdown, html, or empty"
     required: false
@@ -61,7 +64,7 @@ runs:
   # which would add a Go compile to each consumer workflow. The tag is bumped in
   # the release commit and the release workflow refuses to publish unless it
   # matches the tag being released.
-  image: docker://ghcr.io/fgeeha/max-action:v1.0.1
+  image: docker://ghcr.io/fgeeha/max-action:v1.1.0
 
 branding:
   icon: message-square

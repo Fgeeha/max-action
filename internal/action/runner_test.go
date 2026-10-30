@@ -319,3 +319,62 @@ func TestRunDebugStaysSafe(t *testing.T) {
 		t.Errorf("debug output should name the custom host:\n%s", stdout)
 	}
 }
+
+func TestRunUploadsAttachmentFile(t *testing.T) {
+	var uploadAuth string
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/uploads":
+			io.WriteString(w, `{"url":"`+server.URL+`/upload-host"}`)
+		case "/upload-host":
+			uploadAuth = r.Header.Get("Authorization")
+			io.WriteString(w, `{"token":"file-token"}`)
+		default:
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"token":"file-token"`) {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			io.WriteString(w, `{"message":{"body":{"mid":"mid-9"}}}`)
+		}
+	}))
+	defer server.Close()
+
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "docs.zip"), []byte("zip"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, closeStub := newHarness(t, func(http.ResponseWriter, *http.Request) {})
+	defer closeStub()
+	h.inputs["INPUT_API_BASE_URL"] = server.URL
+	h.inputs["INPUT_ATTACHMENT_FILE"] = "docs.zip"
+	h.inputs["GITHUB_WORKSPACE"] = workspace
+
+	if err := h.run(); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stdout.String())
+	}
+	if uploadAuth != "" {
+		t.Fatal("token reached the upload host")
+	}
+	if !strings.Contains(h.outputs(t), "\nmid-9\n") {
+		t.Fatalf("outputs = %q", h.outputs(t))
+	}
+}
+
+func TestRunMissingAttachmentSkipsTheRequest(t *testing.T) {
+	h, closeServer := newHarness(t, func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{}`)
+	})
+	defer closeServer()
+	h.inputs["INPUT_ATTACHMENT_FILE"] = "missing.zip"
+	h.inputs["GITHUB_WORKSPACE"] = t.TempDir()
+
+	err := h.run()
+	if err == nil || !strings.Contains(err.Error(), "attachment_file not found") {
+		t.Fatalf("err = %v", err)
+	}
+	if h.requests != 0 {
+		t.Fatalf("requests = %d, want 0", h.requests)
+	}
+}

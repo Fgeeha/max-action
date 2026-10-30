@@ -106,6 +106,24 @@ Run: https://github.com/Fgeeha/max-action/actions/runs/42
     message_file: notes.txt
 ```
 
+### Attach a file
+
+`attachment_file` uploads a file (up to 50 MiB) and sends it with the message.
+Relative paths resolve against `GITHUB_WORKSPACE`. The bot token goes only to
+the MAX API; the upload host receives a pre-signed URL without it.
+
+```yaml
+- name: Pack the docs
+  run: zip -qr docs.zip docs/html
+
+- uses: Fgeeha/max-action@v1
+  with:
+    token: ${{ secrets.MAX_TOKEN }}
+    chat_id: ${{ secrets.MAX_CHAT_ID }}
+    message: Documentation for ${{ github.sha }}
+    attachment_file: docs.zip
+```
+
 ### Use the outputs
 
 ```yaml
@@ -128,6 +146,7 @@ Run: https://github.com/Fgeeha/max-action/actions/runs/42
 | `user_id` | one of | — | User ID for a direct message. Mutually exclusive with `chat_id`. |
 | `message` | no | — | Message text. Supports multiline values. |
 | `message_file` | no | — | UTF-8 file whose contents override `message`. |
+| `attachment_file` | no | — | File to send with the message, up to 50 MiB. Relative paths resolve against `GITHUB_WORKSPACE`. |
 | `format` | no | `""` | `markdown`, `html`, or empty for plain text. |
 | `notify` | no | `true` | Whether recipients get a notification. |
 | `disable_link_preview` | no | `false` | Disable link previews. |
@@ -246,6 +265,8 @@ Two properties are deliberate:
 | `message exceeds MAX limit of 4000 characters` | Shorten the text, or trim the file used by `message_file`. |
 | `message is empty` | `message_file` pointed at an empty file. |
 | `message_file not found` | The path resolves against `GITHUB_WORKSPACE` and needs `actions/checkout` to run first. |
+| `attachment_file not found` / `exceeds 50 MiB` | Same path rules as `message_file`; files over 50 MiB are rejected before upload. |
+| `attachment.not.ready` | MAX was still processing the file after 5 attempts 2 s apart. Retry the job. |
 | `redirects are not allowed` | `api_base_url` points at something that redirects. Use the direct API host. |
 | Repeated `502`/`503` failures | MAX is unavailable. Raise `retries`, or `timeout` for slow networks. |
 
@@ -268,8 +289,8 @@ bundle, with no shell and no package manager.
 The container runs as the default user so it can read the mounted workspace and
 append to the runner-created `GITHUB_OUTPUT` file.
 
-Only plain text messages are supported. Attachments, images, files and inline
-keyboards are not part of this release.
+Text messages with at most one file attachment are supported. Images as
+photos, video, audio and inline keyboards are not part of this release.
 
 ## Versioning
 
@@ -286,7 +307,7 @@ uses: Fgeeha/max-action@v1
 Pin an exact release when you need reproducible builds:
 
 ```yaml
-uses: Fgeeha/max-action@v1.0.1
+uses: Fgeeha/max-action@v1.1.0
 ```
 
 Each release tag resolves to one immutable image tag, because `action.yml`

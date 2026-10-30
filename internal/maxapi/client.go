@@ -1,5 +1,5 @@
 // Package maxapi implements the minimal MAX Bot API client needed to send one
-// text message.
+// message, optionally with an uploaded file.
 package maxapi
 
 import (
@@ -60,6 +60,9 @@ type Client struct {
 	hc        *http.Client
 	debugf    Logf
 	warnf     Logf
+	// notReadyDelay is the pause between sends while an attachment is still
+	// being processed; tests shorten it.
+	notReadyDelay time.Duration
 }
 
 // New builds a Client that trusts the system roots plus the MAX certificate
@@ -90,44 +93,72 @@ func New(opts Options) (*Client, error) {
 				return errRedirectBlocked
 			},
 		},
-		debugf: opts.Debugf,
-		warnf:  opts.Warnf,
+		debugf:        opts.Debugf,
+		warnf:         opts.Warnf,
+		notReadyDelay: notReadyDelay,
 	}, nil
 }
 
 // Send posts a single message and returns the message ID when the API reports
 // one. An empty ID with a nil error still means the message was accepted.
+// A message with attachments is retried while MAX reports them not ready.
 func (c *Client) Send(ctx context.Context, msg SendMessage) (string, error) {
 	endpoint := c.endpoint(msg)
-	body, err := json.Marshal(messageBody{Text: msg.Text, Notify: msg.Notify, Format: msg.Format})
+	body, err := json.Marshal(messageBody{
+		Text:        msg.Text,
+		Notify:      msg.Notify,
+		Format:      msg.Format,
+		Attachments: msg.Attachments,
+	})
 	if err != nil {
 		return "", fmt.Errorf("cannot encode request body: %w", err)
 	}
 
-	c.log(c.debugf, "sending to %s recipient via %s (%d characters)",
-		msg.RecipientType, endpoint.Host, utf8.RuneCountInString(msg.Text))
+	c.log(c.debugf, "sending to %s recipient via %s (%d characters, %d attachments)",
+		msg.RecipientType, endpoint.Host, utf8.RuneCountInString(msg.Text), len(msg.Attachments))
 
+	req := request{url: endpoint, body: body, contentType: "application/json", auth: true}
+	for notReady := 1; ; notReady++ {
+		data, err := c.retrying(ctx, func(attempt int) ([]byte, retryHint, error) {
+			return c.do(ctx, c.timeout, req, attempt)
+		})
+		if err == nil {
+			return c.messageID(data), nil
+		}
+		if !isNotReady(err) || notReady >= notReadyAttempts || !c.canWait(ctx, c.notReadyDelay) {
+			return "", err
+		}
+		c.log(c.debugf, "attachment is not ready yet, retrying in %s", c.notReadyDelay)
+		if err := wait(ctx, c.notReadyDelay); err != nil {
+			return "", err
+		}
+	}
+}
+
+// retrying runs one request with the retry policy: transient failures are
+// retried with backoff or Retry-After, up to the configured number of retries.
+func (c *Client) retrying(ctx context.Context, try func(attempt int) ([]byte, retryHint, error)) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		mid, hint, err := c.attempt(ctx, endpoint, body, attempt)
+		data, hint, err := try(attempt)
 		if err == nil {
-			return mid, nil
+			return data, nil
 		}
 		lastErr = err
 
 		if !hint.retry || attempt >= c.retries {
-			return "", lastErr
+			return nil, lastErr
 		}
 		delay := hint.after
 		if delay <= 0 {
 			delay = backoff(attempt)
 		}
 		if !c.canWait(ctx, delay) {
-			return "", lastErr
+			return nil, lastErr
 		}
 		c.log(c.debugf, "attempt %d failed (%v), retrying in %s", attempt+1, err, delay.Round(time.Millisecond))
 		if err := wait(ctx, delay); err != nil {
-			return "", lastErr
+			return nil, lastErr
 		}
 	}
 }
@@ -138,29 +169,43 @@ type retryHint struct {
 	after time.Duration
 }
 
-func (c *Client) attempt(parent context.Context, endpoint *url.URL, body []byte, attempt int) (string, retryHint, error) {
-	ctx, cancel := context.WithTimeout(parent, c.timeout)
+// request is one POST. auth marks requests to the MAX API itself: only those
+// carry the Authorization header.
+type request struct {
+	url         *url.URL
+	body        []byte
+	contentType string
+	auth        bool
+}
+
+// do performs one attempt and returns the response body on a 2xx status.
+func (c *Client) do(parent context.Context, timeout time.Duration, r request, attempt int) ([]byte, retryHint, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.url.String(), bytes.NewReader(r.body))
 	if err != nil {
-		return "", retryHint{}, fmt.Errorf("cannot build request: %w", err)
+		return nil, retryHint{}, fmt.Errorf("cannot build request: %w", err)
 	}
-	req.Header.Set("Authorization", c.token)
-	req.Header.Set("Content-Type", "application/json")
+	if r.auth {
+		req.Header.Set("Authorization", c.token)
+	}
+	if r.contentType != "" {
+		req.Header.Set("Content-Type", r.contentType)
+	}
 	req.Header.Set("User-Agent", c.userAgent)
 
 	started := time.Now()
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		if errors.Is(err, errRedirectBlocked) {
-			return "", retryHint{}, errRedirectBlocked
+			return nil, retryHint{}, errRedirectBlocked
 		}
 		// The caller giving up is not a transient failure.
 		if parent.Err() != nil {
-			return "", retryHint{}, fmt.Errorf("request aborted: %s", c.redact(err.Error()))
+			return nil, retryHint{}, fmt.Errorf("request aborted: %s", c.redact(err.Error()))
 		}
-		return "", retryHint{retry: true}, fmt.Errorf("request failed: %s", c.redact(err.Error()))
+		return nil, retryHint{retry: true}, fmt.Errorf("request failed: %s", c.redact(err.Error()))
 	}
 	defer resp.Body.Close()
 
@@ -168,13 +213,14 @@ func (c *Client) attempt(parent context.Context, endpoint *url.URL, body []byte,
 
 	data, err := readLimited(resp.Body)
 	if err != nil {
-		return "", retryHint{}, err
+		return nil, retryHint{}, err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", c.hintFor(resp), &Error{StatusCode: resp.StatusCode, Detail: c.errorDetail(data)}
+		code, detail := c.errorDetail(data)
+		return nil, c.hintFor(resp), &Error{StatusCode: resp.StatusCode, Code: code, Detail: detail}
 	}
-	return c.messageID(data), retryHint{}, nil
+	return data, retryHint{}, nil
 }
 
 // messageID extracts message.body.mid, tolerating an empty body, missing
@@ -224,19 +270,21 @@ func (c *Client) endpoint(msg SendMessage) *url.URL {
 	return &endpoint
 }
 
-// errorDetail pulls a human-readable reason out of an error response.
-func (c *Client) errorDetail(data []byte) string {
+// errorDetail pulls the machine-readable code and a human-readable reason out
+// of an error response.
+func (c *Client) errorDetail(data []byte) (code, detail string) {
 	if len(bytes.TrimSpace(data)) == 0 {
-		return ""
+		return "", ""
 	}
 	var parsed apiError
 	if err := json.Unmarshal(data, &parsed); err == nil && (parsed.Message != "" || parsed.Code != "") {
+		code = c.clean(parsed.Code)
 		if parsed.Message != "" {
-			return c.clean(parsed.Message)
+			return code, c.clean(parsed.Message)
 		}
-		return c.clean(parsed.Code)
+		return code, code
 	}
-	return c.clean(string(data))
+	return "", c.clean(string(data))
 }
 
 // clean strips control characters, collapses whitespace, redacts the token and

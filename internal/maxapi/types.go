@@ -10,14 +10,27 @@ type SendMessage struct {
 	Format             string
 	Notify             bool
 	DisableLinkPreview bool
+	Attachments        []Attachment
+}
+
+// Attachment is an uploaded file referenced by its upload token.
+type Attachment struct {
+	Type    string            `json:"type"`
+	Payload AttachmentPayload `json:"payload"`
+}
+
+// AttachmentPayload carries the token returned by the upload host.
+type AttachmentPayload struct {
+	Token string `json:"token"`
 }
 
 // messageBody is the JSON body of POST /messages. Recipient and
 // disable_link_preview travel as query parameters, per the MAX API.
 type messageBody struct {
-	Text   string `json:"text"`
-	Notify bool   `json:"notify"`
-	Format string `json:"format,omitempty"`
+	Text        string       `json:"text"`
+	Notify      bool         `json:"notify"`
+	Format      string       `json:"format,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // sendResponse is the documented success payload. Unknown fields are ignored
@@ -36,9 +49,11 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
-// Error reports a non-2xx response. Detail is already sanitized and truncated.
+// Error reports a non-2xx response. Code is the MAX error code when present;
+// Detail is already sanitized and truncated.
 type Error struct {
 	StatusCode int
+	Code       string
 	Detail     string
 }
 

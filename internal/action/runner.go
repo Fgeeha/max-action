@@ -20,7 +20,7 @@ type Env struct {
 	Version string
 }
 
-// Run executes one send. Every failure is annotated for the workflow log
+// Run executes one send, uploading attachment_file first when it is set. Every failure is annotated for the workflow log
 // before it is returned, so the caller only has to pick an exit code.
 func Run(ctx context.Context, env Env) error {
 	log := &github.Logger{Out: env.Stdout}
@@ -65,6 +65,21 @@ func Run(ctx context.Context, env Env) error {
 		return err
 	}
 
+	var attachments []maxapi.Attachment
+	if cfg.AttachmentFile != "" {
+		path, err := message.WorkspaceFile("attachment_file", cfg.AttachmentFile, ghCtx.Workspace)
+		if err != nil {
+			log.Errorf("%s", err)
+			return err
+		}
+		attachment, err := client.UploadFile(ctx, path)
+		if err != nil {
+			log.Errorf("%s", err)
+			return err
+		}
+		attachments = append(attachments, attachment)
+	}
+
 	mid, err := client.Send(ctx, maxapi.SendMessage{
 		RecipientType:      cfg.RecipientType,
 		RecipientID:        cfg.RecipientID,
@@ -72,6 +87,7 @@ func Run(ctx context.Context, env Env) error {
 		Format:             cfg.Format,
 		Notify:             cfg.Notify,
 		DisableLinkPreview: cfg.DisableLinkPreview,
+		Attachments:        attachments,
 	})
 	if err != nil {
 		log.Errorf("%s", err)

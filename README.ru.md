@@ -107,6 +107,25 @@ checkout репозитория.
     message_file: notes.txt
 ```
 
+### Вложение файла
+
+`attachment_file` загружает файл (до 50 МиБ) и отправляет его вместе с
+сообщением. Относительные пути разрешаются относительно `GITHUB_WORKSPACE`.
+Токен бота уходит только в MAX API: хост загрузки получает подписанный URL
+без него.
+
+```yaml
+- name: Pack the docs
+  run: zip -qr docs.zip docs/html
+
+- uses: Fgeeha/max-action@v1
+  with:
+    token: ${{ secrets.MAX_TOKEN }}
+    chat_id: ${{ secrets.MAX_CHAT_ID }}
+    message: Documentation for ${{ github.sha }}
+    attachment_file: docs.zip
+```
+
 ### Использование outputs
 
 ```yaml
@@ -129,6 +148,7 @@ checkout репозитория.
 | `user_id` | один из двух | — | ID пользователя для личного сообщения. Взаимоисключающий с `chat_id`. |
 | `message` | нет | — | Текст сообщения. Поддерживает multiline. |
 | `message_file` | нет | — | UTF-8 файл, содержимое которого переопределяет `message`. |
+| `attachment_file` | нет | — | Файл для отправки вместе с сообщением, до 50 МиБ. Относительные пути — от `GITHUB_WORKSPACE`. |
 | `format` | нет | `""` | `markdown`, `html` или пусто для обычного текста. |
 | `notify` | нет | `true` | Получат ли получатели уведомление. |
 | `disable_link_preview` | нет | `false` | Отключить preview ссылок. |
@@ -249,6 +269,8 @@ sha256  6d1b66e7c1aa2512ad3abb50d6a6f144c9ee9d80fd7fbe1c9255a39f8e790944
 | `message exceeds MAX limit of 4000 characters` | Сократите текст или уменьшите файл, используемый в `message_file`. |
 | `message is empty` | `message_file` указывает на пустой файл. |
 | `message_file not found` | Путь разрешается относительно `GITHUB_WORKSPACE`, для этого сначала нужно выполнить `actions/checkout`. |
+| `attachment_file not found` / `exceeds 50 MiB` | Правила путей те же, что у `message_file`; файлы больше 50 МиБ отклоняются до загрузки. |
+| `attachment.not.ready` | MAX не успел обработать файл за 5 попыток с паузой 2 с. Перезапустите job. |
 | `redirects are not allowed` | `api_base_url` указывает на что-то, что делает редирект. Используйте прямой хост API. |
 | Повторяющиеся ошибки `502`/`503` | MAX недоступен. Увеличьте `retries` или `timeout` для медленных сетей. |
 
@@ -272,8 +294,9 @@ Action скачивает предсобранный образ из GitHub Cont
 чтение к смонтированному workspace и дописывать в созданный runner'ом файл
 `GITHUB_OUTPUT`.
 
-Поддерживаются только текстовые сообщения. Вложения, изображения, файлы и
-inline-клавиатуры в этом релизе не входят.
+Поддерживаются текстовые сообщения и не больше одного вложения-файла.
+Изображения как фото, видео, аудио и inline-клавиатуры в этот релиз не
+входят.
 
 ## Версионирование
 
@@ -290,7 +313,7 @@ uses: Fgeeha/max-action@v1
 Закрепите точный релиз, если нужна воспроизводимая сборка:
 
 ```yaml
-uses: Fgeeha/max-action@v1.0.1
+uses: Fgeeha/max-action@v1.1.0
 ```
 
 Каждый релизный тег разрешается ровно в один immutable тег образа, потому

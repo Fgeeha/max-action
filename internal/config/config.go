@@ -35,6 +35,7 @@ type Config struct {
 	RecipientID        int64
 	Message            string
 	MessageFile        string
+	AttachmentFile     string
 	Format             string
 	Notify             bool
 	DisableLinkPreview bool
@@ -57,9 +58,10 @@ func Load(getenv Getenv) (*Config, error) {
 	cfg := &Config{
 		// message keeps its original formatting, only inputs parsed as values
 		// are trimmed.
-		Message:     getenv("INPUT_MESSAGE"),
-		MessageFile: input("message_file"),
-		Format:      input("format"),
+		Message:        getenv("INPUT_MESSAGE"),
+		MessageFile:    input("message_file"),
+		AttachmentFile: input("attachment_file"),
+		Format:         input("format"),
 	}
 
 	cfg.Token = input("token")
