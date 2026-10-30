@@ -11,25 +11,25 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
 const (
-	// MaxAttachmentBytes caps the file read into memory for upload. MAX itself
-	// accepts much larger files; the file is buffered so a failed upload can be
-	// retried, which is the ceiling here.
+	// MaxAttachmentBytes caps the file buffered for upload. MAX itself accepts
+	// much larger files; the encoded body is kept in memory so a failed upload
+	// can be retried, which is the ceiling here.
 	MaxAttachmentBytes = 50 << 20
 
-	// uploadTimeout bounds the transfer of the file itself, which can take far
-	// longer than an ordinary API call.
+	// uploadTimeout bounds the whole upload — every attempt included — since
+	// moving the file can take far longer than an ordinary API call.
 	uploadTimeout = 5 * time.Minute
 
 	// notReadyCode is returned by POST /messages while MAX is still processing
 	// a freshly uploaded attachment.
 	notReadyCode = "attachment.not.ready"
-	// notReadyAttempts and notReadyDelay bound the wait for that processing.
-	notReadyAttempts = 5
+	// notReadyAttempts and notReadyDelay bound the wait for that processing:
+	// about 20 seconds in total.
+	notReadyAttempts = 10
 	notReadyDelay    = 2 * time.Second
 )
 
@@ -37,8 +37,10 @@ const (
 // message. The token is sent only to the MAX API: the upload host gets a
 // pre-signed URL and never sees Authorization.
 func (c *Client) UploadFile(ctx context.Context, path string) (Attachment, error) {
-	name := filepath.Base(path)
-	data, err := readAttachment(path)
+	ctx, cancel := context.WithTimeout(ctx, uploadTimeout)
+	defer cancel()
+
+	body, contentType, size, err := encodeAttachment(path)
 	if err != nil {
 		return Attachment{}, err
 	}
@@ -48,23 +50,25 @@ func (c *Client) UploadFile(ctx context.Context, path string) (Attachment, error
 		return Attachment{}, err
 	}
 
-	c.log(c.debugf, "uploading %s (%d bytes) to %s", name, len(data), uploadURL.Host)
-	token, err := c.uploadData(ctx, uploadURL, name, data)
+	c.log(c.debugf, "uploading a %d-byte file to %s", size, uploadURL.Host)
+	data, err := c.retrying(ctx, uploadTimeout, request{url: uploadURL, body: body, contentType: contentType})
 	if err != nil {
-		return Attachment{}, err
+		return Attachment{}, fmt.Errorf("cannot upload file: %w", err)
 	}
-	return Attachment{Type: "file", Payload: AttachmentPayload{Token: token}}, nil
+
+	var parsed struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil || parsed.Token == "" {
+		return Attachment{}, errors.New("cannot upload file: upload response has no token")
+	}
+	return Attachment{Type: "file", Payload: AttachmentPayload{Token: parsed.Token}}, nil
 }
 
 // uploadURL asks the MAX API where to put the file: POST /uploads?type=file.
 func (c *Client) uploadURL(ctx context.Context) (*url.URL, error) {
-	endpoint := *c.base
-	endpoint.Path = strings.TrimSuffix(endpoint.Path, "/") + "/uploads"
-	endpoint.RawQuery = url.Values{"type": {"file"}}.Encode()
-
-	data, err := c.retrying(ctx, func(attempt int) ([]byte, retryHint, error) {
-		return c.do(ctx, c.timeout, request{url: &endpoint, auth: true}, attempt)
-	})
+	endpoint := c.apiURL("/uploads", url.Values{"type": {"file"}})
+	data, err := c.retrying(ctx, c.timeout, request{url: endpoint, auth: true})
 	if err != nil {
 		return nil, fmt.Errorf("cannot get upload URL: %w", err)
 	}
@@ -87,68 +91,45 @@ func (c *Client) uploadURL(ctx context.Context) (*url.URL, error) {
 	return target, nil
 }
 
-// uploadData posts the file as multipart field "data" and returns its token.
-func (c *Client) uploadData(ctx context.Context, target *url.URL, name string, data []byte) (string, error) {
-	var body bytes.Buffer
-	form := multipart.NewWriter(&body)
-	part, err := form.CreateFormFile("data", name)
-	if err != nil {
-		return "", fmt.Errorf("cannot encode upload: %w", err)
-	}
-	if _, err := part.Write(data); err != nil {
-		return "", fmt.Errorf("cannot encode upload: %w", err)
-	}
-	if err := form.Close(); err != nil {
-		return "", fmt.Errorf("cannot encode upload: %w", err)
-	}
-
-	resp, err := c.retrying(ctx, func(attempt int) ([]byte, retryHint, error) {
-		return c.do(ctx, uploadTimeout, request{
-			url:         target,
-			body:        body.Bytes(),
-			contentType: form.FormDataContentType(),
-		}, attempt)
-	})
-	if err != nil {
-		return "", fmt.Errorf("cannot upload file: %w", err)
-	}
-
-	var parsed struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(resp, &parsed); err != nil || parsed.Token == "" {
-		return "", errors.New("cannot upload file: upload response has no token")
-	}
-	return parsed.Token, nil
-}
-
-// readAttachment reads a regular file no larger than MaxAttachmentBytes.
-func readAttachment(path string) ([]byte, error) {
+// encodeAttachment checks the file and writes it straight into a multipart
+// body as field "data", so the file is held in memory only once.
+func encodeAttachment(path string) (body []byte, contentType string, size int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("attachment_file cannot be read: %s", path)
+		return nil, "", 0, fmt.Errorf("attachment_file cannot be read: %s", path)
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("attachment_file is not a regular file: %s", path)
+		return nil, "", 0, fmt.Errorf("attachment_file is not a regular file: %s", path)
 	}
 	if info.Size() == 0 {
-		return nil, fmt.Errorf("attachment_file is empty: %s", path)
+		return nil, "", 0, fmt.Errorf("attachment_file is empty: %s", path)
 	}
 	if info.Size() > MaxAttachmentBytes {
-		return nil, fmt.Errorf("attachment_file exceeds %d MiB: %s", MaxAttachmentBytes>>20, path)
+		return nil, "", 0, fmt.Errorf("attachment_file exceeds %d MiB: %s", MaxAttachmentBytes>>20, path)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(f, MaxAttachmentBytes+1))
+	var buf bytes.Buffer
+	form := multipart.NewWriter(&buf)
+	part, err := form.CreateFormFile("data", filepath.Base(path))
 	if err != nil {
-		return nil, fmt.Errorf("attachment_file cannot be read: %s", path)
+		return nil, "", 0, fmt.Errorf("cannot encode upload: %w", err)
 	}
-	if len(data) > MaxAttachmentBytes {
-		return nil, fmt.Errorf("attachment_file exceeds %d MiB: %s", MaxAttachmentBytes>>20, path)
+	// The file may grow between Stat and read: copy one byte past the limit
+	// to notice.
+	n, err := io.Copy(part, io.LimitReader(f, MaxAttachmentBytes+1))
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("attachment_file cannot be read: %s", path)
 	}
-	return data, nil
+	if n > MaxAttachmentBytes {
+		return nil, "", 0, fmt.Errorf("attachment_file exceeds %d MiB: %s", MaxAttachmentBytes>>20, path)
+	}
+	if err := form.Close(); err != nil {
+		return nil, "", 0, fmt.Errorf("cannot encode upload: %w", err)
+	}
+	return buf.Bytes(), form.FormDataContentType(), n, nil
 }
 
 // isNotReady reports whether MAX is still processing an attachment.

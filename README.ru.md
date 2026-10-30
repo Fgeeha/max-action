@@ -112,7 +112,7 @@ checkout репозитория.
 `attachment_file` загружает файл (до 50 МиБ) и отправляет его вместе с
 сообщением. Относительные пути разрешаются относительно `GITHUB_WORKSPACE`.
 Токен бота уходит только в MAX API: хост загрузки получает подписанный URL
-без него.
+без него, и этот URL не попадает в логи. Вся загрузка ограничена 5 минутами.
 
 ```yaml
 - name: Pack the docs
@@ -270,7 +270,10 @@ sha256  6d1b66e7c1aa2512ad3abb50d6a6f144c9ee9d80fd7fbe1c9255a39f8e790944
 | `message is empty` | `message_file` указывает на пустой файл. |
 | `message_file not found` | Путь разрешается относительно `GITHUB_WORKSPACE`, для этого сначала нужно выполнить `actions/checkout`. |
 | `attachment_file not found` / `exceeds 50 MiB` | Правила путей те же, что у `message_file`; файлы больше 50 МиБ отклоняются до загрузки. |
-| `attachment.not.ready` | MAX не успел обработать файл за 5 попыток с паузой 2 с. Перезапустите job. |
+| `attachment.not.ready` | MAX не успел обработать файл за 10 попыток с паузой 2 с. Перезапустите job. |
+| `cannot get upload URL ...` | MAX отклонил `POST /uploads`: те же причины, что у HTTP 401/403 выше, или временный сбой MAX. |
+| `cannot upload file: ...` | Хост загрузки ответил ошибкой или не уложился во время. Вся загрузка ограничена 5 минутами независимо от `timeout`. |
+| `attachment_file is empty` / `is not a regular file` | Укажите в `attachment_file` непустой обычный файл, а не каталог или устройство. |
 | `redirects are not allowed` | `api_base_url` указывает на что-то, что делает редирект. Используйте прямой хост API. |
 | Повторяющиеся ошибки `502`/`503` | MAX недоступен. Увеличьте `retries` или `timeout` для медленных сетей. |
 
@@ -313,7 +316,7 @@ uses: Fgeeha/max-action@v1
 Закрепите точный релиз, если нужна воспроизводимая сборка:
 
 ```yaml
-uses: Fgeeha/max-action@v1.1.0
+uses: Fgeeha/max-action@v1.1.1
 ```
 
 Каждый релизный тег разрешается ровно в один immutable тег образа, потому
