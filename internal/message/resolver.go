@@ -68,9 +68,9 @@ func resolveText(cfg *config.Config, ctx Context) (string, error) {
 	return defaultMessage(ctx), nil
 }
 
-// readMessageFile reads a UTF-8 file, resolving relative paths against the
-// workspace. Trailing newlines are preserved as written.
-func readMessageFile(path, workspace string) (string, error) {
+// WorkspaceFile resolves a file input against the workspace and checks that
+// it exists and is not a directory. input names the input in error messages.
+func WorkspaceFile(input, path, workspace string) (string, error) {
 	if !filepath.IsAbs(path) && workspace != "" {
 		path = filepath.Join(workspace, path)
 	}
@@ -78,12 +78,22 @@ func readMessageFile(path, workspace string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("message_file not found: %s", path)
+			return "", fmt.Errorf("%s not found: %s", input, path)
 		}
-		return "", fmt.Errorf("message_file cannot be read: %s", path)
+		return "", fmt.Errorf("%s cannot be read: %s", input, path)
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("message_file is a directory: %s", path)
+		return "", fmt.Errorf("%s is a directory: %s", input, path)
+	}
+	return path, nil
+}
+
+// readMessageFile reads a UTF-8 file, resolving relative paths against the
+// workspace. Trailing newlines are preserved as written.
+func readMessageFile(path, workspace string) (string, error) {
+	path, err := WorkspaceFile("message_file", path, workspace)
+	if err != nil {
+		return "", err
 	}
 
 	data, err := os.ReadFile(path)

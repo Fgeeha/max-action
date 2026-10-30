@@ -34,12 +34,21 @@ jobs:
             exit 1
           }
 
+      # A small archive exercises the whole attachment path: POST /uploads,
+      # the upload host and the wait for attachment processing.
+      - name: Prepare attachment
+        run: |
+          mkdir -p live-attachment
+          printf 'max-action live test\nRun: %s\n' "${GITHUB_RUN_ID}" > live-attachment/readme.txt
+          (cd live-attachment && zip -q ../live-test.zip readme.txt)
+
       - name: Send message
         id: notify
         uses: ./
         with:
           token: ${{ secrets.MAX_TOKEN }}
           chat_id: ${{ secrets.MAX_CHAT_ID }}
+          attachment_file: live-test.zip
           message: |
             ${{ inputs.message }}
 

@@ -18,6 +18,9 @@ inputs:
   message_file:
     description: UTF-8 file whose contents override message
     required: false
+  attachment_file:
+    description: File to attach to the message (up to 50 MiB). Relative paths resolve against GITHUB_WORKSPACE
+    required: false
   format:
     description: "Message format: markdown, html, or empty"
     required: false
