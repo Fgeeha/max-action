@@ -87,6 +87,10 @@ jobs:
     name: Publish release
     needs: publish
     runs-on: ubuntu-latest
+    # Records each published version under Deployments, next to live-test.
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
     # Releases move the major tag one at a time. Runs queue rather than cancel
     # each other, though GitHub keeps only one pending run per group.
     concurrency:
