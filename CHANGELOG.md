@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-30
+
+### Added
+
+- `attachment_file` input: uploads a file of up to 50 MiB through
+  `POST /uploads?type=file` and sends it with the message. The bot token is
+  sent only to the MAX API; the upload host receives a pre-signed URL
+  without `Authorization`.
+- While MAX reports `attachment.not.ready`, the send is retried up to 5 times
+  2 seconds apart.
+- The live integration test attaches a small archive.
+
 ## [1.0.1] - 2026-08-16
 
 ### Changed
