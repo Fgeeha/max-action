@@ -105,6 +105,7 @@ func TestLoadErrors(t *testing.T) {
 		{"base url with bad scheme", map[string]string{"INPUT_API_BASE_URL": "ftp://example.com"}, "absolute http or https URL"},
 		{"plain http for MAX host", map[string]string{"INPUT_API_BASE_URL": "http://platform-api2.max.ru"}, "must use https for MAX API hosts"},
 		{"plain http for max.ru", map[string]string{"INPUT_API_BASE_URL": "http://max.ru"}, "must use https for MAX API hosts"},
+		{"plain http for MAX host with trailing dot", map[string]string{"INPUT_API_BASE_URL": "http://platform-api2.max.ru."}, "must use https for MAX API hosts"},
 	}
 
 	for _, tt := range tests {

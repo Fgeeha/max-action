@@ -178,8 +178,9 @@ func parseBaseURL(value string) (*url.URL, error) {
 }
 
 // isMAXHost reports whether the host belongs to MAX, where plaintext HTTP would
-// leak the Authorization header.
+// leak the Authorization header. A trailing dot names the same host in DNS, so
+// it must not slip past the check.
 func isMAXHost(host string) bool {
-	host = strings.ToLower(host)
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	return host == "max.ru" || strings.HasSuffix(host, ".max.ru")
 }
